@@ -43,6 +43,12 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-DE', { style: 'currency', currency: 'EUR' }).format(value)
 }
 
+const negotiationStyleLabels = [
+  'Tough gatekeeper',
+  'Practical deal-maker',
+  'Premium upseller',
+]
+
 function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelProps) {
   const [provider, setProvider] = useState<'mock' | 'google'>('mock')
   const [phase, setPhase] = useState<Phase>('ready')
@@ -56,6 +62,7 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
     useState<EventBidCallPhase>('quote_collection')
   const [browserTranscript, setBrowserTranscript] = useState<TranscriptEntry[]>([])
   const [browserActive, setBrowserActive] = useState(false)
+  const [restoredCandidates, setRestoredCandidates] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const module2FileRef = useRef<HTMLInputElement | null>(null)
   const browserConversationIdRef = useRef<string | null>(null)
@@ -125,14 +132,12 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
     resumeEventWorkflow(eventPayload)
       .then((saved) => {
         if (!active || !saved?.vendors.length) return
-        const approvedIds = saved.vendors
-          .filter((vendor) => vendor.approved_for_contact)
-          .map((vendor) => vendor.vendor_id)
         setWorkflow(saved)
-        setSelectedIds(approvedIds)
+        setSelectedIds([])
         setProvider(saved.metadata.provider === 'google' ? 'google' : 'mock')
-        setBrowserVendorId(saved.prepared[0]?.vendor_id ?? approvedIds[0] ?? '')
-        setPhase(saved.prepared.length > 0 ? 'prepared' : 'venues')
+        setBrowserVendorId('')
+        setRestoredCandidates(true)
+        setPhase('venues')
       })
       .catch(() => undefined)
     return () => {
@@ -147,6 +152,8 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
       const next = await discoverVenues(eventPayload, provider)
       setWorkflow(next)
       setSelectedIds([])
+      setBrowserVendorId('')
+      setRestoredCandidates(false)
       setPhase('venues')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Venue discovery failed.')
@@ -165,6 +172,8 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
       const next = await importModule2Handoff(eventPayload, handoff)
       setWorkflow(next)
       setSelectedIds([])
+      setBrowserVendorId('')
+      setRestoredCandidates(false)
       setPhase('venues')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import the Module 2 handoff.')
@@ -182,6 +191,15 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
       }
       return [...current, vendor.vendor_id]
     })
+  }
+
+  const editShortlist = () => {
+    setSelectedIds([])
+    setBrowserVendorId('')
+    setBrowserCallPhase('quote_collection')
+    setConfirmRealCalls(false)
+    setError(null)
+    setPhase('venues')
   }
 
   const approveAndPrepare = async () => {
@@ -364,27 +382,41 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
         ))}
       </ol>
 
-      {!workflow && (
-        <section className="border-b border-border pb-6">
+      <section className="border-b border-border pb-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex min-w-52 flex-col gap-1.5 text-sm font-medium text-foreground">
               Venue source
               <select
                 value={provider}
                 onChange={(event) => setProvider(event.target.value as 'mock' | 'google')}
+                disabled={phase === 'loading' || browserActive}
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
               >
                 <option value="mock">Fictional vendors (demo)</option>
                 <option value="google">Google Places</option>
               </select>
             </label>
-            <button type="button" onClick={loadDiscovery} disabled={phase === 'loading'} className={buttonPrimary}>
-              {phase === 'loading' ? 'Finding venues...' : 'Find venues'}
+            <button
+              type="button"
+              onClick={loadDiscovery}
+              disabled={
+                phase === 'loading' ||
+                browserActive ||
+                (provider === 'google' && configuration?.googleConfigured === false)
+              }
+              className={buttonPrimary}
+            >
+              {phase === 'loading'
+                ? 'Finding venues...'
+                : workflow
+                  ? 'Search again'
+                  : 'Find venues'}
             </button>
             <button
               type="button"
               onClick={() => module2FileRef.current?.click()}
-              disabled={phase === 'loading'}
+              disabled={phase === 'loading' || browserActive}
               className={buttonSecondary}
             >
               Import Module 2 JSON
@@ -397,13 +429,36 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
               className="hidden"
             />
           </div>
-          {provider === 'google' && !configuration?.googleConfigured && (
-            <p className="mt-3 text-sm text-muted-foreground">
-              Google discovery requires <code>GOOGLE_MAPS_API_KEY</code> in the local environment.
-            </p>
-          )}
-        </section>
-      )}
+          <div className="flex items-center gap-2 text-sm">
+            <span
+              aria-hidden="true"
+              className={`h-2.5 w-2.5 rounded-full ${
+                configuration?.googleConfigured ? 'bg-emerald-500' : 'bg-muted-foreground'
+              }`}
+            />
+            <span className="font-medium text-foreground">
+              {configuration === null
+                ? 'Checking Google Places'
+                : configuration.googleConfigured
+                  ? 'Google Places connected'
+                  : 'Google Places key missing'}
+            </span>
+            {configuration?.googleConfigured && (
+              <span className="text-xs text-muted-foreground">Server-side</span>
+            )}
+          </div>
+        </div>
+        {provider === 'google' && configuration?.googleConfigured === false && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Add <code>GOOGLE_MAPS_API_KEY</code> to <code>.env</code>, then restart the server.
+          </p>
+        )}
+        {restoredCandidates && phase === 'venues' && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Previous candidates were restored. No venues are selected for this run.
+          </p>
+        )}
+      </section>
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -418,25 +473,36 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Venue candidates</h2>
                 <p className="text-xs text-muted-foreground">
-                  {workflow.vendors.length} candidates · {selectedIds.length} selected
+                  {workflow.vendors.length} candidates / {selectedIds.length} selected
                 </p>
               </div>
               {phase === 'venues' && (
-                <button
-                  type="button"
-                  onClick={approveAndPrepare}
-                  disabled={selectedIds.length === 0}
-                  className={buttonPrimary}
-                >
-                  Approve and prepare
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  {selectedIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedIds([])}
+                      className={buttonSecondary}
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={approveAndPrepare}
+                    disabled={selectedIds.length === 0}
+                    className={buttonPrimary}
+                  >
+                    Approve {selectedIds.length || ''} and prepare
+                  </button>
+                </div>
               )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-200 border-collapse text-left text-sm">
                 <thead className="bg-background text-xs text-muted-foreground">
                   <tr>
-                    <th className="w-14 px-4 py-3">Use</th>
+                    <th className="w-20 px-4 py-3">Select</th>
                     <th className="px-4 py-3">Venue</th>
                     <th className="px-4 py-3">Scenario</th>
                     <th className="px-4 py-3">Distance</th>
@@ -448,20 +514,28 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
                 <tbody>
                   {workflow.vendors.map((vendor) => {
                     const selected = selectedIds.includes(vendor.vendor_id)
+                    const selectionIndex = selectedIds.indexOf(vendor.vendor_id)
                     const preparedVenue = workflow.prepared.find(
                       (item) => item.vendor_id === vendor.vendor_id,
                     )
                     return (
                       <tr key={vendor.vendor_id} className="border-t border-border">
                         <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            disabled={phase !== 'venues'}
-                            onChange={() => toggleVendor(vendor)}
-                            aria-label={`Select ${vendor.name}`}
-                            className="h-4 w-4 accent-primary"
-                          />
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              disabled={phase !== 'venues'}
+                              onChange={() => toggleVendor(vendor)}
+                              aria-label={`Select ${vendor.name}`}
+                              className="h-4 w-4 accent-primary"
+                            />
+                            {selected && (
+                              <span className="text-xs font-semibold text-primary">
+                                {selectionIndex + 1}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="max-w-80 px-4 py-3">
                           <p className="font-semibold text-foreground">{vendor.name}</p>
@@ -470,7 +544,13 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
                           </p>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                          {preparedVenue?.style_label ?? (selected ? 'Assigned on approval' : '-')}
+                          {phase === 'venues'
+                            ? selected
+                              ? negotiationStyleLabels[
+                                  selectionIndex % negotiationStyleLabels.length
+                                ]
+                              : '-'
+                            : preparedVenue?.style_label ?? '-'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                           {formatDistance(vendor.distance_km)}
@@ -506,11 +586,11 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
                   </p>
                   <button
                     type="button"
-                    onClick={() => setPhase('venues')}
+                    onClick={editShortlist}
                     disabled={browserActive}
                     className="mt-2 text-sm font-semibold text-primary hover:underline disabled:opacity-40"
                   >
-                    Edit shortlist
+                    Choose different venues
                   </button>
                 </div>
                 <div className="inline-flex w-full overflow-hidden rounded-lg border border-border md:w-auto" role="tablist">
@@ -549,34 +629,98 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
                       </div>
                     ))}
                   </div>
+
+                  <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full min-w-180 border-collapse text-left text-sm">
+                      <caption className="bg-background px-4 py-3 text-left text-xs text-muted-foreground">
+                        Simulation inputs only. These are not quotations supplied by the venues.
+                      </caption>
+                      <thead className="bg-card text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-3">Round</th>
+                          <th className="px-4 py-3">Venue</th>
+                          <th className="px-4 py-3">Conversation</th>
+                          <th className="px-4 py-3">Scenario total</th>
+                          <th className="px-4 py-3">Result</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {workflow.prepared.slice(0, 3).map((item, index) => (
+                          <tr key={`opening-${item.vendor_id}`} className="border-t border-border">
+                            <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                              Opening {index + 1}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-foreground">
+                              {item.vendor_name}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {item.style_label}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">
+                              {formatMoney(item.roleplay.opening_quote.fixed_total_eur)}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">Demo opening</td>
+                          </tr>
+                        ))}
+                        {leveragePrepared?.roleplay.negotiated_quote && (
+                          <tr className="border-t border-border bg-primary/5">
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-primary">
+                              Leverage follow-up
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-foreground">
+                              {leveragePrepared.vendor_name}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              Cite {leveragePrepared.roleplay.competing_vendor_name} at{' '}
+                              {formatMoney(Number(leveragePrepared.roleplay.competing_quote_eur))}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">
+                              {formatMoney(
+                                leveragePrepared.roleplay.negotiated_quote.fixed_total_eur,
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-primary">
+                              {formatMoney(
+                                leveragePrepared.roleplay.opening_quote.fixed_total_eur -
+                                  leveragePrepared.roleplay.negotiated_quote.fixed_total_eur,
+                              )}{' '}
+                              saved
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
                   <div className="mt-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                     <div>
-                    <p className="text-sm font-medium text-foreground">Three-style negotiation run</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Collects opening quotes, then uses the lowest genuine quote in a follow-up.
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      This automatic mode is text-based. Use Browser voice for live recorded calls.
-                    </p>
-                    {selectedIds.length < 3 && (
-                      <p className="mt-2 text-sm text-destructive">
-                        Select at least three venues to demonstrate all negotiation styles.
+                      <p className="text-sm font-medium text-foreground">
+                        Three opening conversations + one leverage follow-up
                       </p>
-                    )}
-                    {!configuration?.simulationConfigured && (
-                      <p className="mt-2 text-sm text-destructive">
-                        Add <code>ELEVENLABS_API_KEY</code> and <code>ELEVENLABS_AGENT_ID</code> to <code>.env</code>.
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Agent-to-agent conversations run through ElevenLabs. The final ranking uses
+                        confirmed fixed price only.
                       </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={runSimulations}
-                    disabled={!configuration?.simulationConfigured || selectedIds.length < 3}
-                    className={buttonPrimary}
-                  >
-                    Run negotiation demo
-                  </button>
+                      {selectedIds.length < 3 && (
+                        <p className="mt-2 text-sm text-destructive">
+                          Select at least three venues to prepare a leverage round.
+                        </p>
+                      )}
+                      {!configuration?.simulationConfigured && (
+                        <p className="mt-2 text-sm text-destructive">
+                          Add <code>ELEVENLABS_API_KEY</code> and{' '}
+                          <code>ELEVENLABS_AGENT_ID</code> to <code>.env</code>.
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={runSimulations}
+                      disabled={!configuration?.simulationConfigured || selectedIds.length < 3}
+                      className={buttonPrimary}
+                    >
+                      Run 4-round negotiation
+                    </button>
                   </div>
                 </div>
               )}
