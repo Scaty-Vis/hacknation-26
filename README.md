@@ -123,7 +123,13 @@ External Module 2 JSON can be imported on the Calling screen. Its event details 
 
 Alternatively, without connecting Git: `npx netlify-cli login`, `npx netlify-cli init`, `npx netlify-cli deploy --prod` from the project root (still requires setting the two env vars via `netlify env:set` or the dashboard first). Drag-and-drop deploys on netlify.com don't support Functions, so they won't work for this app.
 
-**Modules 2/3 (venue discovery, calling, negotiation, analysis) are local-dev-only for now.** Their `/api/eventbid/*` routes (`server/eventbid.ts`) persist workflow state to the local `.eventbid-data/` directory and an in-memory cache — neither survives across Netlify Functions' ephemeral, potentially cold-started invocations. Porting this pipeline to Netlify would need a durable, shared store (e.g. Netlify Blobs or an external database) in place of `.eventbid-data/`, plus a plan for `/simulate-approved`'s worst-case ~60s runtime against Netlify Functions' execution-time limits. This mirrors the "Deployment note" from before this pipeline existed: production deployment of Modules 2/3 was intentionally deferred, and remains so until that persistence work happens.
+**Modules 2/3 (venue discovery, calling, negotiation, analysis) are also deployable to Netlify.** `server/eventbid.ts`'s persistence (`saveState`/`getState`) is injected rather than hardcoded, so the exact same route logic runs against two different backends:
+- **Local dev/preview**: the original file+in-memory persistence (`.eventbid-data/`), unchanged.
+- **Production on Netlify**: [Netlify Blobs](https://docs.netlify.com/blobs/overview/) (`netlify/functions/lib/eventbidBlobsPersistence.ts`) — a durable, cross-invocation key/value store, since neither a local directory nor an in-memory `Map` survive across serverless invocations.
+
+`/simulate-approved` is the one route that can't just be a regular synchronous Function: it runs up to 5 parallel ElevenLabs simulation calls plus a follow-up negotiation call, worst case ~120 seconds — far beyond a synchronous Function's timeout. It's deployed as a **Netlify Background Function** (`netlify/functions/simulate-approved-background.mts`, up to 15 minutes, free tier included) instead: the client gets an immediate acknowledgement and then polls `/resume` until the simulation results land in Blobs (`src/lib/eventbidApi.ts`'s `simulateApprovedVenues`) — the same pending-job/"Refresh results" pattern already used for real phone calls in `AnalysisPanel.tsx`. Locally, nothing changes — the Vite middleware still responds synchronously and the client uses that response directly without polling.
+
+In Netlify's **Site settings → Environment variables**, add the same additional keys documented above (`ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`, `GOOGLE_MAPS_API_KEY`, `MOCK_TEST_PHONE`, `OPEN_AI_MODEL`) alongside `ELEVENLABS_API_KEY`/`OPEN_AI_API_KEY` for whichever integrations you want live on the deployed site.
 
 The free tier's usage is credit-based and comfortably covers a low-traffic app like this one — check current limits on [netlify.com/pricing](https://www.netlify.com/pricing/), since the exact conversion rates change over time.
 
@@ -140,6 +146,6 @@ The free tier's usage is credit-based and comfortably covers a low-traffic app l
 - `src/lib/eventDetails.ts` — the Module 1 event-details schema, raw-data normalization, classical (non-LLM) validation, and the OpenAI validation prompt/schema — shared by the client form, the local Vite middleware, and the Netlify Functions.
 - `src/lib/eventbidApi.ts` / `eventbidTypes.ts` — typed client integration for the Module 2/3 dashboard.
 - `src/lib/conversationExtraction.ts` — polls ElevenLabs for post-call analysis results.
-- `server/eventbid.ts` — local server API for venue discovery, persistence, call preparation, ElevenLabs calls, and result normalization (Modules 2/3).
-- `vite.config.ts` — Vite config plus the API proxy plugins used for local dev/preview (Module 1's two routes, plus the Module 2/3 `eventbid` API).
-- `netlify/functions/` + `netlify.toml` — the Netlify Functions production equivalents of Module 1's two API routes.
+- `server/eventbid.ts` — venue discovery, call preparation, ElevenLabs calls, and result normalization (Modules 2/3); persistence is injected (`EventBidPersistence`) so this same logic runs locally and on Netlify.
+- `vite.config.ts` — Vite config plus the API proxy plugins used for local dev/preview (all three modules' routes).
+- `netlify/functions/` + `netlify.toml` — the Netlify Functions production equivalents of every API route: `conversations.mts`/`validate-event.mts` (Module 1), `eventbid.mts` (Modules 2/3's fast routes) and `simulate-approved-background.mts` (the one slow route, as a Background Function), plus `lib/eventbidBlobsPersistence.ts` and `lib/connectShim.ts` (shared adapters).

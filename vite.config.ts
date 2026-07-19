@@ -10,7 +10,7 @@ import {
   type EventDetails,
   type EventFieldKey,
 } from './src/lib/eventDetails.js'
-import { eventBidApi } from './server/eventbid.js'
+import { createFileSystemPersistence, eventBidApi } from './server/eventbid.js'
 
 // Proxies GET /api/conversations/:id to the ElevenLabs Conversations API,
 // keeping the xi-api-key out of the client bundle.
@@ -169,13 +169,16 @@ function openAiValidationProxy(apiKey: string | undefined, model: string | undef
 
 function eventBidPlugin(environment: Record<string, string>) {
   const handler = () =>
-    eventBidApi({
-      googleMapsApiKey: environment.GOOGLE_MAPS_API_KEY,
-      elevenLabsApiKey: environment.ELEVENLABS_API_KEY,
-      elevenLabsAgentId: environment.ELEVENLABS_AGENT_ID,
-      elevenLabsPhoneNumberId: environment.ELEVENLABS_PHONE_NUMBER_ID,
-      mockTestPhone: environment.MOCK_TEST_PHONE,
-    })
+    eventBidApi(
+      {
+        googleMapsApiKey: environment.GOOGLE_MAPS_API_KEY,
+        elevenLabsApiKey: environment.ELEVENLABS_API_KEY,
+        elevenLabsAgentId: environment.ELEVENLABS_AGENT_ID,
+        elevenLabsPhoneNumberId: environment.ELEVENLABS_PHONE_NUMBER_ID,
+        mockTestPhone: environment.MOCK_TEST_PHONE,
+      },
+      createFileSystemPersistence(),
+    )
 
   return {
     name: 'eventbid-api',

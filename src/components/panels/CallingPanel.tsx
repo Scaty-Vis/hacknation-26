@@ -206,7 +206,7 @@ function CallingPanel({ eventPayload, onContinue, onStartOver }: CallingPanelPro
     setError(null)
     setPhase('simulating')
     try {
-      const simulated = await simulateApprovedVenues(workflow.event.event_id)
+      const simulated = await simulateApprovedVenues(workflow.event.event_id, eventPayload)
       setWorkflow(simulated)
       const successful = simulated.jobs.filter(
         (job) => job.execution_mode === 'agent_simulation' && job.success,
