@@ -16,7 +16,9 @@ export default async (req: Request) => {
   const handler = eventBidApi(
     {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
-      elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
+      // Module 2/3's venue-calling agent can live under a different
+      // ElevenLabs account than Module 1's intake agent, so it gets its own key.
+      elevenLabsApiKey: process.env.ELEVENLABS_API_KEY_2,
       elevenLabsAgentId: process.env.ELEVENLABS_AGENT_ID,
       elevenLabsPhoneNumberId: process.env.ELEVENLABS_PHONE_NUMBER_ID,
       mockTestPhone: process.env.MOCK_TEST_PHONE,

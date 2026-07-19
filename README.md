@@ -58,10 +58,15 @@ Add values to `.env` in the project root (copied from `.env.example`). Never put
 # Module 1 browser voice agent. Agent IDs are public identifiers.
 VITE_ELEVENLABS_INTAKE_AGENT_ID=
 
-# Server-side ElevenLabs credential used for simulations, conversation retrieval, and calls.
+# Server-side ElevenLabs credential for Module 1 (conversation retrieval/validation).
 ELEVENLABS_API_KEY=
 
-# Module 3 venue-calling agent. Required for AI simulation and browser voice.
+# Server-side ElevenLabs credential for Module 2/3 (simulations, browser voice, real calls).
+# Separate from ELEVENLABS_API_KEY since the venue-calling agent can live under a
+# different ElevenLabs account/workspace than the Module 1 intake agent.
+ELEVENLABS_API_KEY_2=
+
+# Module 3 venue-calling agent (must exist under the ELEVENLABS_API_KEY_2 account). Required for AI simulation and browser voice.
 ELEVENLABS_AGENT_ID=
 
 # Required only for real phone calls.
@@ -80,7 +85,7 @@ MOCK_TEST_PHONE=
 
 Twilio Account SID and Auth Token are not required. The Twilio number is controlled through the number already imported into ElevenLabs.
 
-Agent-to-agent simulation requires only `ELEVENLABS_API_KEY` and `ELEVENLABS_AGENT_ID`. It does not require Twilio, a phone number, or verified recipients. The simulator is text-based and has no call recording; it is labelled accordingly. Its transcript, analysis, fictional quote profile, and leverage evidence are saved in the local workflow.
+Agent-to-agent simulation requires only `ELEVENLABS_API_KEY_2` and `ELEVENLABS_AGENT_ID`. It does not require Twilio, a phone number, or verified recipients. The simulator is text-based and has no call recording; it is labelled accordingly. Its transcript, analysis, fictional quote profile, and leverage evidence are saved in the local workflow.
 
 Browser voice uses the Module 3 agent in the dashboard. The person at the computer acts as the selected venue representative using the displayed style, itemization, and concession rule. The agent must allow public browser access in ElevenLabs. The Analysis screen retrieves retained audio through a server-side proxy so the ElevenLabs key never reaches the browser.
 
@@ -89,7 +94,7 @@ Real calls are sequential, limited to three, and require:
 - Planner consent from Module 1.
 - Manual approval for each selected venue.
 - A validated telephone number.
-- `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_PHONE_NUMBER_ID`.
+- `ELEVENLABS_API_KEY_2`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_PHONE_NUMBER_ID`.
 - The visible real-call confirmation checkbox.
 
 No code path books a venue or makes a binding commitment.
@@ -129,7 +134,7 @@ Alternatively, without connecting Git: `npx netlify-cli login`, `npx netlify-cli
 
 `/simulate-approved` is the one route that can't just be a regular synchronous Function: it runs up to 5 parallel ElevenLabs simulation calls plus a follow-up negotiation call, worst case ~120 seconds — far beyond a synchronous Function's timeout. It's deployed as a **Netlify Background Function** (`netlify/functions/simulate-approved-background.mts`, up to 15 minutes, free tier included) instead: the client gets an immediate acknowledgement and then polls `/resume` until the simulation results land in Blobs (`src/lib/eventbidApi.ts`'s `simulateApprovedVenues`) — the same pending-job/"Refresh results" pattern already used for real phone calls in `AnalysisPanel.tsx`. Locally, nothing changes — the Vite middleware still responds synchronously and the client uses that response directly without polling.
 
-In Netlify's **Site settings → Environment variables**, add the same additional keys documented above (`ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`, `GOOGLE_MAPS_API_KEY`, `MOCK_TEST_PHONE`, `OPEN_AI_MODEL`) alongside `ELEVENLABS_API_KEY`/`OPEN_AI_API_KEY` for whichever integrations you want live on the deployed site.
+In Netlify's **Site settings → Environment variables**, add the same additional keys documented above (`ELEVENLABS_API_KEY_2`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`, `GOOGLE_MAPS_API_KEY`, `MOCK_TEST_PHONE`, `OPEN_AI_MODEL`) alongside `ELEVENLABS_API_KEY`/`OPEN_AI_API_KEY` for whichever integrations you want live on the deployed site.
 
 The free tier's usage is credit-based and comfortably covers a low-traffic app like this one — check current limits on [netlify.com/pricing](https://www.netlify.com/pricing/), since the exact conversion rates change over time.
 

@@ -172,7 +172,9 @@ function eventBidPlugin(environment: Record<string, string>) {
     eventBidApi(
       {
         googleMapsApiKey: environment.GOOGLE_MAPS_API_KEY,
-        elevenLabsApiKey: environment.ELEVENLABS_API_KEY,
+        // Module 2/3's venue-calling agent can live under a different
+        // ElevenLabs account than Module 1's intake agent, so it gets its own key.
+        elevenLabsApiKey: environment.ELEVENLABS_API_KEY_2,
         elevenLabsAgentId: environment.ELEVENLABS_AGENT_ID,
         elevenLabsPhoneNumberId: environment.ELEVENLABS_PHONE_NUMBER_ID,
         mockTestPhone: environment.MOCK_TEST_PHONE,
