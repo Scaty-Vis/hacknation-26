@@ -15,6 +15,7 @@ dist-ssr
 
 # Secrets
 .env
+.eventbid-data
 
 # Editor directories and files
 .vscode/*
