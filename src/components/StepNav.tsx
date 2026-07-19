@@ -16,12 +16,12 @@ function StepNav({ currentStep, maxUnlockedIndex, onSelect }: StepNavProps) {
           const isComplete = index < maxUnlockedIndex
 
           return (
-            <li key={step.id} className="flex-1 md:flex-none">
+            <li key={step.id} className="min-w-0 flex-1 md:flex-none">
               <button
                 type="button"
                 disabled={!isUnlocked}
                 onClick={() => onSelect(step.id)}
-                className={`flex w-full items-center gap-3 border-l-4 px-4 py-4 text-left transition-colors ${
+                className={`flex w-full min-w-0 items-center justify-center gap-2 border-l-4 px-2 py-3 text-left transition-colors md:justify-start md:gap-3 md:px-4 md:py-4 ${
                   isCurrent ? 'border-primary bg-background' : 'border-transparent hover:bg-background/60'
                 } ${!isUnlocked ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
               >
@@ -32,13 +32,15 @@ function StepNav({ currentStep, maxUnlockedIndex, onSelect }: StepNavProps) {
                       : 'bg-secondary text-muted-foreground'
                   }`}
                 >
-                  {isComplete ? '✓' : index + 1}
+                  {isComplete ? '\u2713' : index + 1}
                 </span>
                 <span className="hidden flex-col md:flex">
                   <span className="text-sm font-medium text-foreground">{step.label}</span>
                   <span className="text-xs text-muted-foreground">{step.description}</span>
                 </span>
-                <span className="text-xs font-medium text-foreground md:hidden">{step.label}</span>
+                <span className="min-w-0 text-center text-xs font-medium leading-tight text-foreground md:hidden">
+                  {step.label}
+                </span>
               </button>
             </li>
           )

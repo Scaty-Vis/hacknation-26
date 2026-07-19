@@ -10,10 +10,10 @@ import {
   type EventDetails,
   type EventFieldKey,
 } from './src/lib/eventDetails.js'
+import { eventBidApi } from './server/eventbid.js'
 
 // Proxies GET /api/conversations/:id to the ElevenLabs Conversations API,
-// keeping the xi-api-key out of the client bundle. Runs for both `vite dev`
-// and `vite preview` since neither ships a real backend.
+// keeping the xi-api-key out of the client bundle.
 function elevenLabsConversationsProxy(apiKey: string | undefined) {
   const handler: Connect.NextHandleFunction = (req, res, next) => {
     const match = req.url?.match(/^\/conversations\/([^/?]+)/)
@@ -65,19 +65,12 @@ async function readJsonBody(req: Connect.IncomingMessage): Promise<unknown> {
   return raw ? JSON.parse(raw) : {}
 }
 
-// Proxies POST /api/validate-event to OpenAI, keeping OPEN_AI_API_KEY out of
-// the client bundle. Runs for both `vite dev` and `vite preview`.
-function openAiValidationProxy(apiKey: string | undefined) {
+// Uses deterministic validation for objective fields and OpenAI only for
+// judgment-based fields when an API key and model are configured.
+function openAiValidationProxy(apiKey: string | undefined, model: string | undefined) {
   const handler: Connect.NextHandleFunction = (req, res, next) => {
     if (req.method !== 'POST' || !req.url?.match(/^\/validate-event/)) {
       next()
-      return
-    }
-
-    if (!apiKey) {
-      res.statusCode = 500
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ error: 'OPEN_AI_API_KEY is not set. Add it to .env.' }))
       return
     }
 
@@ -86,10 +79,17 @@ function openAiValidationProxy(apiKey: string | undefined) {
         const values = body as EventDetails
         const classicalErrors = runClassicalValidation(values)
 
-        // Only the fields that need judgment go to the LLM — smaller payload,
-        // fewer tokens. catering_required is included as read-only context so
-        // the model knows whether catering_food even applies.
-        const llmPayload: Record<string, unknown> = { catering_required: values.catering_required }
+        if (!apiKey || !model) {
+          const valid = Object.values(classicalErrors).every((message) => !message)
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ valid, fieldErrors: classicalErrors }))
+          return
+        }
+
+        const llmPayload: Record<string, unknown> = {
+          catering_required: values.catering_required,
+        }
         for (const key of LLM_VALIDATED_FIELD_KEYS) llmPayload[key] = values[key]
 
         const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -99,7 +99,7 @@ function openAiValidationProxy(apiKey: string | undefined) {
             'content-type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'gpt-4o',
+            model,
             messages: [
               { role: 'system', content: EVENT_VALIDATION_SYSTEM_PROMPT },
               { role: 'user', content: JSON.stringify(llmPayload) },
@@ -122,15 +122,23 @@ function openAiValidationProxy(apiKey: string | undefined) {
         if (!upstream.ok) {
           res.statusCode = upstream.status
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: upstreamBody?.error?.message ?? 'OpenAI request failed' }))
+          res.end(
+            JSON.stringify({
+              error: upstreamBody.error?.message ?? 'OpenAI request failed',
+            }),
+          )
           return
         }
 
-        const llmResult = JSON.parse(upstreamBody.choices?.[0]?.message?.content ?? '{}') as {
+        const llmResult = JSON.parse(
+          upstreamBody.choices?.[0]?.message?.content ?? '{}',
+        ) as {
           fieldErrors?: Partial<Record<EventFieldKey, string | null>>
         }
 
-        const fieldErrors: Partial<Record<EventFieldKey, string>> = { ...classicalErrors }
+        const fieldErrors: Partial<Record<EventFieldKey, string>> = {
+          ...classicalErrors,
+        }
         for (const key of LLM_VALIDATED_FIELD_KEYS) {
           const message = llmResult.fieldErrors?.[key]
           if (message) fieldErrors[key] = message
@@ -159,6 +167,27 @@ function openAiValidationProxy(apiKey: string | undefined) {
   }
 }
 
+function eventBidPlugin(environment: Record<string, string>) {
+  const handler = () =>
+    eventBidApi({
+      googleMapsApiKey: environment.GOOGLE_MAPS_API_KEY,
+      elevenLabsApiKey: environment.ELEVENLABS_API_KEY,
+      elevenLabsAgentId: environment.ELEVENLABS_AGENT_ID,
+      elevenLabsPhoneNumberId: environment.ELEVENLABS_PHONE_NUMBER_ID,
+      mockTestPhone: environment.MOCK_TEST_PHONE,
+    })
+
+  return {
+    name: 'eventbid-api',
+    configureServer(server: import('vite').ViteDevServer) {
+      server.middlewares.use('/api/eventbid', handler())
+    },
+    configurePreviewServer(server: import('vite').PreviewServer) {
+      server.middlewares.use('/api/eventbid', handler())
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -167,7 +196,8 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       elevenLabsConversationsProxy(env.ELEVENLABS_API_KEY),
-      openAiValidationProxy(env.OPEN_AI_API_KEY),
+      openAiValidationProxy(env.OPEN_AI_API_KEY, env.OPEN_AI_MODEL),
+      eventBidPlugin(env),
     ],
   }
 })

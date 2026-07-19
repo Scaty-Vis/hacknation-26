@@ -8,15 +8,17 @@ import {
   type CollectedVariables,
 } from '../../lib/conversationExtraction'
 import { normalizeEventDetails, wasLocationRadiusDefaulted, type EventDetails } from '../../lib/eventDetails'
+import type { Module1EventPayload } from '../../lib/eventbidTypes'
 
-const AGENT_ID = 'agent_0001kxveg8t5ekzs8pnyf18y4z5f'
+const INTAKE_AGENT_ID =
+  import.meta.env.VITE_ELEVENLABS_INTAKE_AGENT_ID || 'agent_0001kxveg8t5ekzs8pnyf18y4z5f'
 
 type Phase = 'idle' | 'in-call' | 'extracting' | 'ready' | 'error'
 
 type TranscriptEntry = { role: 'user' | 'agent'; message: string }
 
 type InformationGatheringPanelProps = {
-  onSubmitted: (values: EventDetails) => void
+  onSubmitted: (payload: Module1EventPayload) => void
 }
 
 function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelProps) {
@@ -28,6 +30,8 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const conversationIdRef = useRef<string | null>(null)
+  const sourceAgentIdRef = useRef(INTAKE_AGENT_ID)
+  const collectedAtRef = useRef<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const conversation = useConversation({
@@ -69,9 +73,11 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
     setTranscript([])
     setEventDetails(null)
     conversationIdRef.current = null
+    sourceAgentIdRef.current = INTAKE_AGENT_ID
+    collectedAtRef.current = null
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true })
-      conversation.startSession({ agentId: AGENT_ID, connectionType: 'webrtc' })
+      conversation.startSession({ agentId: INTAKE_AGENT_ID, connectionType: 'webrtc' })
     } catch (err) {
       console.error(err)
       setErrorMessage('Could not access your microphone. Check permissions and try again.')
@@ -82,6 +88,38 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
   const handleUploadClick = () => {
     setUploadError(null)
     fileInputRef.current?.click()
+  }
+
+  const loadDemoEvent = () => {
+    conversationIdRef.current = 'conv_local_demo'
+    sourceAgentIdRef.current = INTAKE_AGENT_ID
+    collectedAtRef.current = new Date().toISOString()
+    setEventDetails(
+      normalizeEventDetails({
+        event_category: 'private',
+        requester: 'Local Demo',
+        event_type: 'Birthday',
+        fixed_date: '2026-08-29',
+        date_range_start: null,
+        date_range_end: null,
+        fixed_start_time: '21:00',
+        start_time_start: null,
+        start_time_end: null,
+        duration: 3,
+        location: 'Berlin',
+        location_radius_km: 20,
+        guest_count: 20,
+        guest_count_exact: true,
+        catering_required: false,
+        venue_catering_mandatory: null,
+        budget_per_guest: 250,
+        budget_currency: 'euros',
+        catering_food: '',
+      }),
+    )
+    setRadiusDefaulted(false)
+    setUploadError(null)
+    setPhase('ready')
   }
 
   const handleFileSelected = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -98,6 +136,8 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
         return
       }
       conversationIdRef.current = typeof parsed.conversationId === 'string' ? parsed.conversationId : null
+      sourceAgentIdRef.current = typeof parsed.agentId === 'string' ? parsed.agentId : INTAKE_AGENT_ID
+      collectedAtRef.current = typeof parsed.collectedAt === 'string' ? parsed.collectedAt : null
       setEventDetails(normalizeEventDetails(rawVariables))
       setRadiusDefaulted(wasLocationRadiusDefaulted(rawVariables))
       setUploadError(null)
@@ -128,13 +168,24 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
             Start conversation
           </button>
           <div>
-            <button
-              type="button"
-              onClick={handleUploadClick}
-              className="text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Upload JSON instead
-            </button>
+            <div className="flex flex-wrap gap-4">
+              <button
+                type="button"
+                onClick={handleUploadClick}
+                className="text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Upload JSON instead
+              </button>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={loadDemoEvent}
+                  className="text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Load local demo event
+                </button>
+              )}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -207,8 +258,25 @@ function InformationGatheringPanel({ onSubmitted }: InformationGatheringPanelPro
           initialValues={eventDetails}
           radiusDefaulted={radiusDefaulted}
           conversationId={conversationIdRef.current}
-          agentId={AGENT_ID}
-          onSubmitted={onSubmitted}
+          agentId={sourceAgentIdRef.current}
+          onSubmitted={(values: EventDetails) =>
+            onSubmitted({
+              conversationId: conversationIdRef.current,
+              agentId: sourceAgentIdRef.current,
+              collectedAt: collectedAtRef.current ?? new Date().toISOString(),
+              variables: values,
+              permissions: {
+                vendor_discovery_approved: true,
+                vendor_calls_approved: true,
+                may_disclose_requester_name: true,
+                may_disclose_exact_budget: false,
+                may_negotiate: true,
+                may_use_genuine_competing_quotes: true,
+                may_record_and_transcribe: true,
+                may_book: false,
+              },
+            })
+          }
         />
       )}
     </div>

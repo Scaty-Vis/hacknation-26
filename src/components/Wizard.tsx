@@ -4,6 +4,7 @@ import InformationGatheringPanel from './panels/InformationGatheringPanel'
 import CallingPanel from './panels/CallingPanel'
 import AnalysisPanel from './panels/AnalysisPanel'
 import { WIZARD_STEPS, type WizardStepId } from '../types'
+import type { EventBidWorkflow, Module1EventPayload } from '../lib/eventbidTypes'
 
 type WizardProps = {
   onStartOver: () => void
@@ -12,6 +13,8 @@ type WizardProps = {
 function Wizard({ onStartOver }: WizardProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [maxUnlockedIndex, setMaxUnlockedIndex] = useState(0)
+  const [eventPayload, setEventPayload] = useState<Module1EventPayload | null>(null)
+  const [workflow, setWorkflow] = useState<EventBidWorkflow | null>(null)
 
   const currentStep = WIZARD_STEPS[stepIndex].id
 
@@ -27,17 +30,30 @@ function Wizard({ onStartOver }: WizardProps) {
   return (
     <div className="flex flex-1 flex-col md:flex-row">
       <StepNav currentStep={currentStep} maxUnlockedIndex={maxUnlockedIndex} onSelect={goToStep} />
-      <main className="flex-1">
+      <main className="min-w-0 flex-1">
         {currentStep === 'gathering' && (
           <InformationGatheringPanel
-            onSubmitted={() => {
-              unlockStep(stepIndex + 1)
-              setStepIndex((prev) => prev + 1)
+            onSubmitted={(payload) => {
+              setEventPayload(payload)
+              unlockStep(1)
+              setStepIndex(1)
             }}
           />
         )}
-        {currentStep === 'calling' && <CallingPanel onStartOver={onStartOver} />}
-        {currentStep === 'analysis' && <AnalysisPanel onStartOver={onStartOver} />}
+        {currentStep === 'calling' && eventPayload && (
+          <CallingPanel
+            eventPayload={eventPayload}
+            onContinue={(nextWorkflow) => {
+              setWorkflow(nextWorkflow)
+              unlockStep(2)
+              setStepIndex(2)
+            }}
+            onStartOver={onStartOver}
+          />
+        )}
+        {currentStep === 'analysis' && workflow && (
+          <AnalysisPanel workflow={workflow} onStartOver={onStartOver} />
+        )}
       </main>
     </div>
   )
