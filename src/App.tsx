@@ -3,8 +3,9 @@ import Landing from './components/Landing'
 import Wizard from './components/Wizard'
 import Imprint from './components/legal/Imprint'
 import PrivacyPolicy from './components/legal/PrivacyPolicy'
-
-type View = 'landing' | 'wizard' | 'imprint' | 'privacy'
+import SiteHeader from './components/SiteHeader'
+import SiteFooter from './components/SiteFooter'
+import type { View } from './types'
 
 function App() {
   const [view, setView] = useState<View>('landing')
@@ -13,11 +14,18 @@ function App() {
     window.scrollTo(0, 0)
   }, [view])
 
-  if (view === 'wizard') return <Wizard onStartOver={() => setView('landing')} />
-  if (view === 'imprint') return <Imprint onBack={() => setView('landing')} />
-  if (view === 'privacy') return <PrivacyPolicy onBack={() => setView('landing')} />
-
-  return <Landing onGetStarted={() => setView('wizard')} onNavigateLegal={setView} />
+  return (
+    <div className="flex min-h-full flex-col">
+      <SiteHeader view={view} onGetStarted={() => setView('wizard')} onHome={() => setView('landing')} />
+      <div className="flex flex-1 flex-col">
+        {view === 'wizard' && <Wizard onStartOver={() => setView('landing')} />}
+        {view === 'imprint' && <Imprint />}
+        {view === 'privacy' && <PrivacyPolicy />}
+        {view === 'landing' && <Landing onGetStarted={() => setView('wizard')} />}
+      </div>
+      <SiteFooter onNavigateLegal={setView} />
+    </div>
+  )
 }
 
 export default App

@@ -1,8 +1,5 @@
-import BrandMark from './BrandMark'
-
 type LandingProps = {
   onGetStarted: () => void
-  onNavigateLegal: (page: 'imprint' | 'privacy') => void
 }
 
 const TRUST_ITEMS = ['No forms to fill', 'Real vendor calls', 'Side-by-side offers']
@@ -25,20 +22,9 @@ const STEPS = [
   },
 ]
 
-function Landing({ onGetStarted, onNavigateLegal }: LandingProps) {
+function Landing({ onGetStarted }: LandingProps) {
   return (
-    <div className="min-h-full bg-background">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <BrandMark />
-        <button
-          type="button"
-          onClick={onGetStarted}
-          className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          Get started
-        </button>
-      </header>
-
+    <div className="flex-1 bg-background">
       <section
         className="relative overflow-hidden px-6 pt-16 pb-24 text-center"
         style={{
@@ -128,18 +114,6 @@ function Landing({ onGetStarted, onNavigateLegal }: LandingProps) {
           </button>
         </div>
       </section>
-
-      <footer className="border-t border-border px-6 py-8 text-center text-sm text-muted-foreground">
-        <p>© {new Date().getFullYear()} Bidly. Voice-first event sourcing.</p>
-        <p className="mt-2 flex items-center justify-center gap-4">
-          <button type="button" onClick={() => onNavigateLegal('imprint')} className="hover:text-foreground">
-            Imprint
-          </button>
-          <button type="button" onClick={() => onNavigateLegal('privacy')} className="hover:text-foreground">
-            Privacy Policy
-          </button>
-        </p>
-      </footer>
     </div>
   )
 }

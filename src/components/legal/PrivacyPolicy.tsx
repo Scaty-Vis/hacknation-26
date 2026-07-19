@@ -1,12 +1,8 @@
 import LegalLayout, { LegalSection } from './LegalLayout'
 
-type PrivacyPolicyProps = {
-  onBack: () => void
-}
-
-function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
+function PrivacyPolicy() {
   return (
-    <LegalLayout title="Privacy Policy" onBack={onBack}>
+    <LegalLayout title="Privacy Policy">
       <LegalSection title="1. Controller">
         <p>
           Bidly Inc.

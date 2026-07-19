@@ -1,12 +1,8 @@
 import LegalLayout, { LegalSection } from './LegalLayout'
 
-type ImprintProps = {
-  onBack: () => void
-}
-
-function Imprint({ onBack }: ImprintProps) {
+function Imprint() {
   return (
-    <LegalLayout title="Imprint" onBack={onBack}>
+    <LegalLayout title="Imprint">
       <LegalSection title="Information according to § 5 DDG">
         <p>
           Bidly Inc.

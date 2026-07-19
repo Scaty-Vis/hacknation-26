@@ -1,3 +1,5 @@
+export type View = 'landing' | 'wizard' | 'imprint' | 'privacy'
+
 export type WizardStepId = 'gathering' | 'calling' | 'analysis'
 
 export const WIZARD_STEPS: { id: WizardStepId; label: string; description: string }[] = [

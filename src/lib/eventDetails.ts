@@ -65,6 +65,39 @@ function toEventCategory(value: unknown): EventCategory | null {
   return value === 'private' || value === 'corporate' ? value : null
 }
 
+export const CURRENCY_PRESETS = ['Euros', 'US dollars', 'British pounds', 'Swiss francs'] as const
+
+const CURRENCY_ALIASES: Record<string, string> = {
+  euro: 'Euros',
+  euros: 'Euros',
+  eur: 'Euros',
+  '€': 'Euros',
+  dollar: 'US dollars',
+  dollars: 'US dollars',
+  usd: 'US dollars',
+  'us dollar': 'US dollars',
+  'us dollars': 'US dollars',
+  $: 'US dollars',
+  pound: 'British pounds',
+  pounds: 'British pounds',
+  gbp: 'British pounds',
+  'british pound': 'British pounds',
+  'british pounds': 'British pounds',
+  '£': 'British pounds',
+  franc: 'Swiss francs',
+  francs: 'Swiss francs',
+  chf: 'Swiss francs',
+  'swiss franc': 'Swiss francs',
+  'swiss francs': 'Swiss francs',
+}
+
+/** Maps common currency spellings (whatever casing ElevenLabs happens to return) to a canonical, capitalized label. */
+export function normalizeCurrency(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  return CURRENCY_ALIASES[trimmed.toLowerCase()] ?? trimmed
+}
+
 /**
  * Tolerant coercion for whatever ElevenLabs' Data Collection actually returns —
  * booleans sometimes arrive as "true"/"false" strings, and some "unset" values
@@ -89,7 +122,7 @@ export function normalizeEventDetails(raw: Record<string, unknown>): EventDetail
     catering_required: toBool(raw.catering_required),
     venue_catering_mandatory: toBoolTriState(raw.venue_catering_mandatory),
     budget_per_guest: toNumber(raw.budget_per_guest),
-    budget_currency: toStringOrEmpty(raw.budget_currency),
+    budget_currency: normalizeCurrency(toStringOrEmpty(raw.budget_currency)),
     catering_food: toStringOrEmpty(raw.catering_food),
   }
 }
@@ -106,6 +139,99 @@ export function deriveDateFlexible(details: EventDetails): boolean {
 export function deriveTimeFlexible(details: EventDetails): boolean {
   if (details.fixed_start_time) return false
   return Boolean(details.start_time_start || details.start_time_end)
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+const MAX_YEARS_AHEAD = 5
+
+function maxFutureDateIso(): string {
+  const date = new Date()
+  date.setUTCFullYear(date.getUTCFullYear() + MAX_YEARS_AHEAD)
+  return date.toISOString().slice(0, 10)
+}
+
+/**
+ * Deterministic checks for every field that's objectively right-or-wrong —
+ * no LLM judgment needed. Date and time are validated independently of each
+ * other by construction (two separate blocks, disjoint field sets) so a
+ * flexible date range can never affect whether a fixed start time is valid.
+ */
+export function runClassicalValidation(details: EventDetails): Partial<Record<EventFieldKey, string>> {
+  const errors: Partial<Record<EventFieldKey, string>> = {}
+  const today = todayIso()
+
+  if (details.event_category !== 'private' && details.event_category !== 'corporate') {
+    errors.event_category = 'Select private or corporate.'
+  }
+
+  // Date — independent of time.
+  const hasFixedDate = Boolean(details.fixed_date)
+  const hasDateRange = Boolean(details.date_range_start || details.date_range_end)
+  const maxFuture = maxFutureDateIso()
+  if (hasFixedDate && hasDateRange) {
+    errors.fixed_date = 'Provide either a fixed date or a date range, not both.'
+  } else if (hasFixedDate) {
+    if (details.fixed_date! < today) errors.fixed_date = 'Event date must be today or in the future.'
+    else if (details.fixed_date! > maxFuture)
+      errors.fixed_date = `Event date cannot be more than ${MAX_YEARS_AHEAD} years from now.`
+  } else if (hasDateRange) {
+    if (!details.date_range_start || !details.date_range_end) {
+      errors[details.date_range_start ? 'date_range_end' : 'date_range_start'] =
+        'Both the earliest and latest acceptable dates are required.'
+    } else if (details.date_range_start < today) {
+      errors.date_range_start = 'Start of date range must be today or in the future.'
+    } else if (details.date_range_start > details.date_range_end) {
+      errors.date_range_start = 'Date range start must be on or before date range end.'
+      errors.date_range_end = 'Date range start must be on or before date range end.'
+    } else if (details.date_range_end > maxFuture) {
+      errors.date_range_end = `Date range cannot extend more than ${MAX_YEARS_AHEAD} years from now.`
+    }
+  } else {
+    errors.fixed_date = 'Provide either a fixed date or a date range.'
+  }
+
+  // Start time — independent of date; a bare time-of-day has no "in the past" check.
+  const hasFixedTime = Boolean(details.fixed_start_time)
+  const hasTimeRange = Boolean(details.start_time_start || details.start_time_end)
+  if (hasFixedTime && hasTimeRange) {
+    errors.fixed_start_time = 'Provide either a fixed start time or a time range, not both.'
+  } else if (hasTimeRange) {
+    if (!details.start_time_start || !details.start_time_end) {
+      errors[details.start_time_start ? 'start_time_end' : 'start_time_start'] =
+        'Both the earliest and latest acceptable start times are required.'
+    } else if (details.start_time_start > details.start_time_end) {
+      errors.start_time_start = 'Start time range start must be on or before its end.'
+      errors.start_time_end = 'Start time range start must be on or before its end.'
+    }
+  } else if (!hasFixedTime) {
+    errors.fixed_start_time = 'Provide either a fixed start time or a time range.'
+  }
+
+  if (!details.guest_count || details.guest_count <= 0 || !Number.isInteger(details.guest_count)) {
+    errors.guest_count = 'Enter a whole number of guests greater than 0.'
+  }
+
+  if (details.location_radius_km == null || details.location_radius_km <= 0) {
+    errors.location_radius_km = 'Enter a positive number for the travel radius.'
+  }
+
+  if (details.catering_required && details.venue_catering_mandatory == null) {
+    errors.venue_catering_mandatory = 'Choose whether venue catering is mandatory or external catering is acceptable.'
+  }
+
+  const hasBudgetAmount = details.budget_per_guest != null
+  const hasBudgetCurrency = Boolean(details.budget_currency)
+  if (hasBudgetAmount !== hasBudgetCurrency) {
+    if (!hasBudgetCurrency) errors.budget_currency = 'Enter a currency to go with the budget amount.'
+    if (!hasBudgetAmount) errors.budget_per_guest = 'Enter a budget amount to go with the currency.'
+  } else if (hasBudgetAmount && details.budget_per_guest! <= 0) {
+    errors.budget_per_guest = 'Enter a positive budget amount.'
+  }
+
+  return errors
 }
 
 export const EVENT_FIELD_KEYS = [
@@ -132,14 +258,30 @@ export const EVENT_FIELD_KEYS = [
 
 export type EventFieldKey = (typeof EVENT_FIELD_KEYS)[number]
 
+/**
+ * Everything else (event_category, dates, times, guest_count, budget, etc.)
+ * is objectively right-or-wrong and handled by runClassicalValidation instead
+ * — the LLM is reserved for fields that need actual judgment, which also
+ * keeps this payload/schema small and keeps token cost down.
+ */
+export const LLM_VALIDATED_FIELD_KEYS = [
+  'requester',
+  'event_type',
+  'location',
+  'catering_food',
+  'duration',
+] as const satisfies readonly EventFieldKey[]
+
+export type LlmValidatedFieldKey = (typeof LLM_VALIDATED_FIELD_KEYS)[number]
+
 export const EVENT_VALIDATION_SCHEMA = {
   type: 'object',
   properties: {
     valid: { type: 'boolean' },
     fieldErrors: {
       type: 'object',
-      properties: Object.fromEntries(EVENT_FIELD_KEYS.map((key) => [key, { type: ['string', 'null'] }])),
-      required: [...EVENT_FIELD_KEYS],
+      properties: Object.fromEntries(LLM_VALIDATED_FIELD_KEYS.map((key) => [key, { type: ['string', 'null'] }])),
+      required: [...LLM_VALIDATED_FIELD_KEYS],
       additionalProperties: false,
     },
   },
@@ -147,21 +289,15 @@ export const EVENT_VALIDATION_SCHEMA = {
   additionalProperties: false,
 } as const
 
-export const EVENT_VALIDATION_SYSTEM_PROMPT = `You validate event-sourcing intake data collected for Bidly, a voice-first event-planning service. You will receive a JSON object with these fields: ${EVENT_FIELD_KEYS.join(', ')}.
+export const EVENT_VALIDATION_SYSTEM_PROMPT = `You validate a handful of free-text/judgment fields from event-sourcing intake data for Bidly, a voice-first event-planning service. Every other field in the real data has already been checked mechanically — you only judge these: requester, event_type, location, catering_food, duration. You will also receive catering_required as read-only context (never validate or flag it yourself).
 
-Check every rule below and return valid:true ONLY if all of them pass. For any field that fails, set a short, specific, user-facing error message (e.g. "Enter a number of guests greater than 0") in fieldErrors under that field's exact key. Every field not listed as an error must be set to null in fieldErrors, and valid must be false if fieldErrors has at least one non-null entry.
+Check every rule below and return valid:true ONLY if all of them pass. For any field that fails, set a short, specific, user-facing error message in fieldErrors under that field's exact key. Every field not listed as an error must be set to null in fieldErrors, and valid must be false if fieldErrors has at least one non-null entry.
 
 Rules:
-1. event_category must be exactly "private" or "corporate".
-2. requester must be a non-empty string (the caller's name if private, the company name if corporate).
-3. event_type must be a non-empty string describing the kind of event.
-4. Exactly one of these must be true: (a) fixed_date is a valid date and date_range_start/date_range_end are both empty, or (b) fixed_date is empty and BOTH date_range_start and date_range_end are valid dates with date_range_start on or before date_range_end. Flag fixed_date if violated, or date_range_start/date_range_end individually if the range is incomplete or reversed.
-5. Exactly one of these must be true: (a) fixed_start_time is a valid time and start_time_start/start_time_end are both empty, or (b) fixed_start_time is empty and BOTH start_time_start and start_time_end are valid times with start_time_start on or before start_time_end. Flag fixed_start_time if violated, or start_time_start/start_time_end individually if the range is incomplete or reversed.
-6. duration must be a positive number (hours).
-7. location must be a non-empty string.
-8. location_radius_km must be a positive number.
-9. guest_count must be a positive whole number.
-10. Check catering_required FIRST. If catering_required is false: venue_catering_mandatory and catering_food are IRRELEVANT — you MUST set both to null in fieldErrors no matter what value they hold (empty, null, non-empty, anything). Do NOT apply any non-empty/required check to them in this case. Only if catering_required is true: venue_catering_mandatory must be true or false (not null), and catering_food must be non-empty — flag whichever of those two is missing.
-11. If budget_per_guest is set, budget_currency must also be non-empty (and vice versa) — ANY non-empty text is acceptable for budget_currency (e.g. "euros", "EUR", "€", "US dollars" are all fine); do not require a specific format, code, or symbol. Leaving both budget_per_guest and budget_currency empty (no budget limit given) is valid and should not be flagged.
+1. requester must be a plausible real name or company name (non-empty, not gibberish).
+2. event_type must plausibly name a real kind of event (e.g. wedding, birthday, conference, product launch, team offsite) — reject gibberish or text that clearly isn't a kind of event.
+3. location must plausibly be a real place, city, or venue area — reject clearly nonsensical entries (e.g. "paper towel" is NOT a location).
+4. duration must be a sensible number of hours for a single real-world event (e.g. 1–48 is normal) — reject non-positive numbers and absurd values (e.g. 1000 hours is never sensible for one event).
+5. catering_food is only evaluated when catering_required is true: it must then be a plausible description of food/catering (non-empty, not gibberish). When catering_required is false, ALWAYS set catering_food to null in fieldErrors regardless of its value — never flag it.
 
-IMPORTANT: These 11 rules are the ONLY validation criteria. Do not invent, infer, or apply any additional requirement, format, or convention beyond exactly what a rule states — if a rule doesn't apply given the current field values (e.g. rule 10 when catering_required is false), that field's entry in fieldErrors must be null.`
+IMPORTANT: These 5 rules are the ONLY validation criteria. Do not invent, infer, or apply any additional requirement beyond exactly what a rule states.`

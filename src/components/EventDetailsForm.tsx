@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { downloadJson } from '../lib/downloadJson'
 import {
+  CURRENCY_PRESETS,
   deriveDateFlexible,
   deriveTimeFlexible,
   EVENT_FIELD_KEYS,
@@ -9,8 +10,6 @@ import {
   type EventDetails,
   type EventFieldKey,
 } from '../lib/eventDetails'
-
-const CURRENCY_PRESETS = ['euros', 'US dollars', 'British pounds', 'Swiss francs']
 
 const inputClass =
   'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
@@ -73,7 +72,7 @@ function EventDetailsForm({ initialValues, radiusDefaulted, conversationId, agen
     values.event_category === 'private' ? "Caller's name" : values.event_category === 'corporate' ? 'Company name' : 'Name'
 
   const currencyOptions =
-    values.budget_currency && !CURRENCY_PRESETS.includes(values.budget_currency)
+    values.budget_currency && !(CURRENCY_PRESETS as readonly string[]).includes(values.budget_currency)
       ? [...CURRENCY_PRESETS, values.budget_currency]
       : CURRENCY_PRESETS
 
