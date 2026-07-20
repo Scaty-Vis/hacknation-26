@@ -10,8 +10,7 @@ import {
 import { normalizeEventDetails, wasLocationRadiusDefaulted, type EventDetails } from '../../lib/eventDetails'
 import type { Module1EventPayload } from '../../lib/eventbidTypes'
 
-const INTAKE_AGENT_ID =
-  import.meta.env.VITE_ELEVENLABS_INTAKE_AGENT_ID || 'agent_0001kxveg8t5ekzs8pnyf18y4z5f'
+const INTAKE_AGENT_ID = import.meta.env.VITE_ELEVENLABS_INTAKE_AGENT_ID ?? ''
 
 type Phase = 'idle' | 'in-call' | 'extracting' | 'ready' | 'error'
 
