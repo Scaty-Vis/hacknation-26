@@ -147,9 +147,6 @@ type WorkflowState = {
   metadata: JsonObject
 }
 
-const dataDirectory = join(process.cwd(), '.eventbid-data')
-const stateCache = new Map<string, WorkflowState>()
-
 const negotiationStyles: NegotiationStyle[] = [
   'tough_gatekeeper',
   'practical_dealmaker',
@@ -1005,21 +1002,40 @@ function simulatedVenuePrompt(
   ].join('\n')
 }
 
-async function saveState(state: WorkflowState) {
-  stateCache.set(state.event.event_id, state)
-  await mkdir(dataDirectory, { recursive: true })
-  await writeFile(join(dataDirectory, `${state.event.event_id}.json`), JSON.stringify(state, null, 2), 'utf-8')
+export type EventBidPersistence = {
+  save(state: WorkflowState): Promise<void>
+  load(eventId: string): Promise<WorkflowState>
 }
 
-async function getState(eventId: string): Promise<WorkflowState> {
-  const cached = stateCache.get(eventId)
-  if (cached) return cached
-  try {
-    const state = JSON.parse(await readFile(join(dataDirectory, `${eventId}.json`), 'utf-8')) as WorkflowState
-    stateCache.set(eventId, state)
-    return state
-  } catch {
-    throw new Error(`Event workflow not found: ${eventId}`)
+/**
+ * The original local-dev persistence: an in-memory cache backed by JSON files
+ * under .eventbid-data/. Used by the Vite middleware (vite.config.ts) so local
+ * behavior stays exactly as it was before this became injectable. Netlify
+ * Functions inject a Blobs-backed implementation instead (see
+ * netlify/functions/lib/eventbidBlobsPersistence.ts) since neither the Map nor
+ * process.cwd() survive across serverless invocations.
+ */
+export function createFileSystemPersistence(): EventBidPersistence {
+  const dataDirectory = join(process.cwd(), '.eventbid-data')
+  const stateCache = new Map<string, WorkflowState>()
+
+  return {
+    async save(state) {
+      stateCache.set(state.event.event_id, state)
+      await mkdir(dataDirectory, { recursive: true })
+      await writeFile(join(dataDirectory, `${state.event.event_id}.json`), JSON.stringify(state, null, 2), 'utf-8')
+    },
+    async load(eventId) {
+      const cached = stateCache.get(eventId)
+      if (cached) return cached
+      try {
+        const state = JSON.parse(await readFile(join(dataDirectory, `${eventId}.json`), 'utf-8')) as WorkflowState
+        stateCache.set(eventId, state)
+        return state
+      } catch {
+        throw new Error(`Event workflow not found: ${eventId}`)
+      }
+    },
   }
 }
 
@@ -1241,7 +1257,10 @@ function normalizedSimulationResult(
   }
 }
 
-export function eventBidApi(environment: EventBidEnvironment) {
+export function eventBidApi(environment: EventBidEnvironment, persistence: EventBidPersistence) {
+  const saveState = (state: WorkflowState) => persistence.save(state)
+  const getState = (eventId: string) => persistence.load(eventId)
+
   const handler: Connect.NextHandleFunction = async (req, res, next) => {
     const url = new URL(req.url || '/', 'http://localhost')
     try {
