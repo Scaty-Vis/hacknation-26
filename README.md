@@ -1,18 +1,26 @@
 # Bidly
 
-Bidly is a voice-first event sourcing dashboard. A planner describes an event to an ElevenLabs intake agent, reviews the collected Module 1 data, discovers and approves venues, prepares consent-gated venue calls, and compares the resulting quotations.
+## The problem
+
+Getting quotes for an event venue means calling around: prices for the same date and headcount can differ a lot between providers, but nobody has the stamina to actually call them all, negotiate, and compare fairly. Bidly automates that. A planner describes the event once, Bidly's agents call the vendors and negotiate on the planner's behalf, and the dashboard recommends the best deal it found — but the planner keeps full control and makes the final decision. Nothing is booked automatically.
+
+Bidly is a voice-first event sourcing dashboard. A planner describes an event to an ElevenLabs intake agent, reviews the collected data, discovers and approves venues, prepares consent-gated venue calls, and compares the resulting quotations.
 
 ## Local workflow
 
-The dashboard has three working steps:
+The dashboard has three steps:
 
-1. **Information Gathering**: talk to the ElevenLabs intake agent or upload Module 1 JSON. Review the fields in an editable table, explicitly consent to vendor discovery, calling, and negotiation, and submit. OpenAI validation is optional; deterministic (non-LLM) validation is used for objective fields either way, and is used exclusively when OpenAI is not configured.
-2. **Venue conversations**: run fictional discovery, use Google Places, or import matching external Module 2 JSON. The first three approved venues receive the Tough gatekeeper, Practical deal-maker, and Premium upseller scenarios. Choose automatic agent simulation, live browser voice role-play, or authorised real phone calls.
-3. **Analysis**: show opening and negotiated prices, itemized quote fields, commercial terms, transcript evidence, retained call audio when available, and a price-only recommendation.
+1. **Information Gathering**: talk to the ElevenLabs intake agent or upload a Module 1 JSON file. Review the collected fields in an editable table, explicitly consent to vendor discovery, calling, and negotiation, and submit. OpenAI validation is optional; deterministic (non-LLM) validation covers objective fields either way, and is used exclusively when OpenAI is not configured.
+2. **Calling**: run fictional discovery, use Google Places, or import a matching external Module 2 JSON. The first three approved venues each get one of the Tough gatekeeper, Practical deal-maker, and Premium upseller negotiation styles. Choose automatic agent-to-agent simulation, live browser voice role-play, or (with explicit confirmation) real phone calls.
+3. **Analysis**: compare opening and negotiated prices, itemized quote fields, commercial terms, transcript evidence, retained call audio when available, and a price-only recommendation — the planner decides what to do with it.
 
-Also included: an Imprint and a Privacy Policy page, and a shared sticky header + footer (`SiteHeader.tsx` / `SiteFooter.tsx`) present on every page, so Home/Get Started and the legal links are always reachable.
+Also included: a landing page, an Imprint and a Privacy Policy page, and a shared sticky header + footer (`SiteHeader.tsx` / `SiteFooter.tsx`) present on every page, so Home/Get Started and the legal links are always reachable.
 
-The complete local flow runs under one Vite process. Server-side API routes keep credentials out of the browser bundle. Module 2/3 workflow state is written to the ignored `.eventbid-data/` directory and is resumed when the same Module 1 event is reopened.
+The complete local flow runs under one Vite process. Server-side API routes keep credentials out of the browser bundle. Module 2/3 workflow state is persisted (locally to `.eventbid-data/`, on Netlify to Blobs — see "Deploying to Netlify" below) and resumed when the same Module 1 event is reopened.
+
+## Known issues
+
+Google Places discovery (the **Google Places** option in step 2) currently returns a 403 in this environment because the available `GOOGLE_MAPS_API_KEY` has no billing account / free-tier credit behind it — Places API (New) rejects requests from unfunded keys even under the nominal free tier. The discovery code itself (`googleVendors` in `server/eventbid.ts`) is implemented and was verified working end-to-end against a trial Google Cloud account with billing enabled. Everything else — Module 1 intake, mock/imported venue discovery, calling, negotiation, and analysis — works as documented below. Until a funded key is available, use **Fictional vendors (demo)** or **Import Module 2 JSON** instead of **Google Places**.
 
 ## Requirements
 
@@ -36,11 +44,11 @@ Open the printed local URL. To test the complete pipeline without Twilio:
 2. Review it, tick the consent checkbox, and submit.
 3. Select **Fictional vendors (demo)** and click **Find venues**.
 4. Select at least three venues and click **Approve and prepare**.
-5. Keep **AI simulation** selected and click **Run negotiation demo**.
-6. The three opening conversations run together. A fourth follow-up uses the cheapest completed quote as genuine leverage.
+5. Keep **AI simulation** selected and click **Run 4-round negotiation**.
+6. The three opening conversations run together. A fourth follow-up cites the cheapest completed genuine quote as leverage.
 7. Review the price movement, ranked recommendation, and both rounds of transcript evidence.
 
-For a challenge-valid live voice demonstration, select **Browser voice** instead. A teammate plays the supplied venue role for all three opening calls. After those calls complete, the dashboard unlocks the prepared leverage follow-up. ElevenLabs recordings appear in Analysis after conversation processing when workspace retention allows audio retrieval.
+For a challenge-valid live voice demonstration, select **Browser voice** instead. A teammate plays the supplied venue role for all three opening calls. After those calls complete, the dashboard unlocks the prepared leverage follow-up. ElevenLabs recordings appear in Analysis after conversation processing, when workspace retention allows audio retrieval.
 
 Run checks with:
 
@@ -73,6 +81,8 @@ ELEVENLABS_AGENT_ID=
 ELEVENLABS_PHONE_NUMBER_ID=
 
 # Module 2 Google discovery. Not needed for Mock or imported JSON.
+# Requires a Places API (New) key backed by an active billing account, even for free-tier usage.
+# See "Known issues" above if you get a 403 here.
 GOOGLE_MAPS_API_KEY=
 
 # Optional validation assistance.
@@ -91,17 +101,17 @@ Browser voice uses the Module 3 agent in the dashboard. The person at the comput
 
 Real calls are sequential, limited to three, and require:
 
-- Planner consent from Module 1.
+- Planner consent from Module 1 (`vendor_calls_approved`).
 - Manual approval for each selected venue.
 - A validated telephone number.
 - `ELEVENLABS_API_KEY_2`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_PHONE_NUMBER_ID`.
 - The visible real-call confirmation checkbox.
 
-No code path books a venue or makes a binding commitment.
+No code path books a venue or makes a binding commitment — `may_book` is always `false` in the permissions the planner grants.
 
 ## Module 1 and Module 2 handoff
 
-The Module 1 payload contains:
+The Module 1 payload (`Module1EventPayload` in `src/lib/eventbidTypes.ts`) contains:
 
 ```json
 {
@@ -109,7 +119,16 @@ The Module 1 payload contains:
   "agentId": "...",
   "collectedAt": "...",
   "variables": {},
-  "permissions": {}
+  "permissions": {
+    "vendor_discovery_approved": true,
+    "vendor_calls_approved": true,
+    "may_disclose_requester_name": true,
+    "may_disclose_exact_budget": false,
+    "may_negotiate": true,
+    "may_use_genuine_competing_quotes": true,
+    "may_record_and_transcribe": true,
+    "may_book": false
+  }
 }
 ```
 
@@ -118,6 +137,7 @@ External Module 2 JSON can be imported on the Calling screen. Its event details 
 ## Deploying to Netlify (free tier)
 
 **Module 1 (Information Gathering) is deployable today.** Its two API routes — `/api/conversations/:id` and `/api/validate-event` — exist in two parallel forms sharing the same logic from `src/lib/eventDetails.ts`:
+
 - **Local dev/preview**: Vite middleware plugins in `vite.config.ts`, active under `vite dev`/`vite preview`.
 - **Production on Netlify**: Netlify Functions in `netlify/functions/` (`conversations.mts`, `validate-event.mts`), adapted to Netlify's Fetch API-style function signature. `netlify.toml` wires up the build command, publish directory, and functions directory.
 
@@ -129,6 +149,7 @@ External Module 2 JSON can be imported on the Calling screen. Its event details 
 Alternatively, without connecting Git: `npx netlify-cli login`, `npx netlify-cli init`, `npx netlify-cli deploy --prod` from the project root (still requires setting the two env vars via `netlify env:set` or the dashboard first). Drag-and-drop deploys on netlify.com don't support Functions, so they won't work for this app.
 
 **Modules 2/3 (venue discovery, calling, negotiation, analysis) are also deployable to Netlify.** `server/eventbid.ts`'s persistence (`saveState`/`getState`) is injected rather than hardcoded, so the exact same route logic runs against two different backends:
+
 - **Local dev/preview**: the original file+in-memory persistence (`.eventbid-data/`), unchanged.
 - **Production on Netlify**: [Netlify Blobs](https://docs.netlify.com/blobs/overview/) (`netlify/functions/lib/eventbidBlobsPersistence.ts`) — a durable, cross-invocation key/value store, since neither a local directory nor an in-memory `Map` survive across serverless invocations.
 
@@ -145,7 +166,7 @@ The free tier's usage is credit-based and comfortably covers a low-traffic app l
 - `src/components/Wizard.tsx` / `StepNav.tsx` — the 3-step wizard shell and step-lock navigation.
 - `src/components/panels/InformationGatheringPanel.tsx` — Module 1 voice/JSON intake and the editable review table.
 - `src/components/panels/CallingPanel.tsx` — Module 2 discovery/import, approval, agent simulation, browser voice, and real-call confirmation.
-- `src/components/panels/AnalysisPanel.tsx` — Module 3 result comparison and transcript evidence.
+- `src/components/panels/AnalysisPanel.tsx` — Module 3 result comparison, transcript evidence, and the price-only recommendation.
 - `src/components/EventDetailsForm.tsx` — the editable review table shown after a call ends or a JSON file is uploaded.
 - `src/components/legal/` — Imprint and Privacy Policy pages.
 - `src/lib/eventDetails.ts` — the Module 1 event-details schema, raw-data normalization, classical (non-LLM) validation, and the OpenAI validation prompt/schema — shared by the client form, the local Vite middleware, and the Netlify Functions.

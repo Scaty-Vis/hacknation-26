@@ -5,10 +5,12 @@ import { invokeConnectHandler } from './lib/connectShim.js'
 
 // Netlify Functions equivalent of the eventBidPlugin Vite middleware
 // (vite.config.ts) for every Module 2/3 route EXCEPT /simulate-approved,
-// which Netlify resolves to the more specific background function below
-// instead of this wildcard. Reuses eventBidApi()'s exact routing/business
-// logic unchanged via the Connect shim, with Blobs instead of the filesystem
-// for state.
+// which is excluded below so it always goes to the background function
+// instead (Netlify's docs don't guarantee exact-path-over-wildcard
+// precedence when two functions' paths overlap, so this is made explicit
+// rather than relied upon implicitly). Reuses eventBidApi()'s exact
+// routing/business logic unchanged via the Connect shim, with Blobs instead
+// of the filesystem for state.
 export default async (req: Request) => {
   const handler = eventBidApi(
     {
@@ -28,4 +30,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: '/api/eventbid/*',
+  excludedPath: '/api/eventbid/simulate-approved',
 }

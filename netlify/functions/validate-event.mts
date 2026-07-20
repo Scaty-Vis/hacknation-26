@@ -20,16 +20,19 @@ export default async (req: Request) => {
   }
 
   const apiKey = process.env.OPEN_AI_API_KEY
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: 'OPEN_AI_API_KEY is not set. Add it in Site settings > Environment variables.' }),
-      { status: 500, headers: { 'content-type': 'application/json' } },
-    )
-  }
+  const model = process.env.OPEN_AI_MODEL
 
   try {
     const values = (await req.json()) as EventDetails
     const classicalErrors = runClassicalValidation(values)
+
+    if (!apiKey || !model) {
+      const valid = Object.values(classicalErrors).every((message) => !message)
+      return new Response(JSON.stringify({ valid, fieldErrors: classicalErrors }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
 
     // Only the fields that need judgment go to the LLM — smaller payload,
     // fewer tokens. catering_required is included as read-only context so
@@ -44,7 +47,7 @@ export default async (req: Request) => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model,
         messages: [
           { role: 'system', content: EVENT_VALIDATION_SYSTEM_PROMPT },
           { role: 'user', content: JSON.stringify(llmPayload) },
